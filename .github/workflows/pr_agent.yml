@@ -1,0 +1,30 @@
+name: PR Agent
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+
+jobs:
+  pr_agent_job:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: write
+    name: Run pr agent on every pull request, respond to user comments
+    steps:
+      - name: PR Agent action step
+        id: pragent
+        uses: docker://codiumai/pr-agent:0.30-github_action
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_KEY: ${{ secrets.PR_AGENT_OPENAI_KEY }}
+          # Custom review instructions
+          pr_reviewer.extra_instructions: "Review security vulnerabilities and performance issues. Check for proper error handling. Check for spelling errors in user-facing text, API names, or documentation"
+          config.ai_timeout: "300"
+          # Tool configuration
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"
