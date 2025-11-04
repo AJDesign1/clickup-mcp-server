@@ -1,14 +1,23 @@
-FROM node:22.12-alpine AS builder
+FROM node:20-alpine
 
-COPY . /app
 WORKDIR /app
 
-# Install dependencies and build TypeScript code
-RUN npm ci && npm run build
+# copy package files first
+COPY package*.json ./
 
-# Set environment variables
+# install deps (use npm install, not npm ci, so we don't care about a perfect lockfile)
+RUN npm install
+
+# copy the rest of the code
+COPY . .
+
+# tell node it's production
 ENV NODE_ENV=production
-# ENV CLICKUP_WORKSPACE_ID=123456789
 
-# Run the server
-CMD ["node", "dist/index.js"]
+# Render will give us PORT, but default to 8080
+ENV PORT=8080
+
+EXPOSE 8080
+
+# start our HTTP wrapper
+CMD ["npm", "start"]
