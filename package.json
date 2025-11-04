@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "build": "tsup src/index.ts --format esm,cjs --dts",
-    "start": "node dist/index.js",
+    "start": "node server.js",
     "inspector": "npx @modelcontextprotocol/inspector dist/index.js",
     "clean": "npx rimraf dist"
   },
@@ -31,10 +31,12 @@
   },
   "homepage": "https://github.com/Leanware-io/clickup-mcp-server#readme",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.5.0",
+     "@modelcontextprotocol/sdk": "^1.5.0",
     "dotenv": "^16.4.7",
     "tsup": "^8.3.6",
-    "zod": "^3.24.2"
+    "zod": "^3.24.2",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
