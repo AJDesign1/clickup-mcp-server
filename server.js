@@ -44,11 +44,11 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     }
 
     const { search, list_id } = req.query;
+    // 🔹 NEW: default limit 5 instead of 50
+    const limit = parseInt(req.query.limit || "5", 10);
 
     let url;
-    // if user gives a list_id, list tasks from that list
     if (list_id) {
-      // https://api.clickup.com/api/v2/list/{list_id}/task
       const params = new URLSearchParams({
         subtasks: "true",
         archived: "false"
@@ -56,11 +56,9 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       if (search) params.set("search", search);
       url = `https://api.clickup.com/api/v2/list/${list_id}/task?${params.toString()}`;
     } else {
-      // workspace (team) level search
       if (!CLICKUP_WORKSPACE_ID) {
         return res.status(500).json({ error: "CLICKUP_WORKSPACE_ID not set" });
       }
-      // https://api.clickup.com/api/v2/team/{team_id}/task
       const params = new URLSearchParams({
         subtasks: "true",
         archived: "false",
@@ -82,21 +80,21 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     }
 
     const data = await cuRes.json();
-
-    // ClickUp returns { tasks: [...] }
     const tasks = data.tasks || [];
 
-    // normalize to "items" like we used before
-    const items = tasks.map(t => ({
+    // 🔹 NEW: limit results to 5 (or value from query)
+    const limited = tasks.slice(0, limit);
+
+    const items = limited.map(t => ({
       id: t.id,
       name: t.name,
-      url: t.url, // ClickUp gives a 'url' field
+      url: t.url,
       status: t.status?.status,
-      // include custom fields too, pass raw
+      list: t.list ? t.list.name : null,
       custom_fields: t.custom_fields || []
     }));
 
-    res.json({ items });
+    res.json({ items, total_returned: items.length });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error", details: err.message });
