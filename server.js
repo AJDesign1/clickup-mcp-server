@@ -7,36 +7,32 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 const MCP_BEARER = process.env.MCP_BEARER;
 const CLICKUP_API_TOKEN = process.env.CLICKUP_API_TOKEN;
-const CLICKUP_WORKSPACE_ID = process.env.CLICKUP_WORKSPACE_ID; // sometimes called team_id
+const CLICKUP_WORKSPACE_ID = process.env.CLICKUP_WORKSPACE_ID;
 
 app.use(express.json());
 
 // auth middleware (let /health through)
 app.use((req, res, next) => {
   if (req.path === "/health") return next();
-  if (!MCP_BEARER) return next(); // no bearer set ⇒ open
+  if (!MCP_BEARER) return next(); // if no bearer is set, don't block
   const auth = req.headers.authorization || "";
   if (auth === `Bearer ${MCP_BEARER}`) return next();
   return res.status(401).json({ error: "Unauthorized" });
 });
 
-// simple health
+// health check
 app.get("/health", (req, res) => {
   res.json({ ok: true });
 });
 
-// MCP-style discovery
+// list tools
 app.get("/tools", (req, res) => {
   res.json({
-    tools: [
-      "clickup_list_tasks",
-      "clickup_get_task"
-    ]
+    tools: ["clickup_list_tasks", "clickup_get_task"]
   });
 });
 
-// list tasks (workspace-wide) using ClickUp API
-// GET /tools/clickup_list_tasks?search=foo&list_id=123
+// list tasks (with default limit 5)
 app.get("/tools/clickup_list_tasks", async (req, res) => {
   try {
     if (!CLICKUP_API_TOKEN) {
@@ -44,11 +40,13 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     }
 
     const { search, list_id } = req.query;
-    // 🔹 NEW: default limit 5 instead of 50
+    // default to 5 to avoid big payloads
     const limit = parseInt(req.query.limit || "5", 10);
 
     let url;
+
     if (list_id) {
+      // list-specific tasks
       const params = new URLSearchParams({
         subtasks: "true",
         archived: "false"
@@ -56,6 +54,7 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       if (search) params.set("search", search);
       url = `https://api.clickup.com/api/v2/list/${list_id}/task?${params.toString()}`;
     } else {
+      // workspace/team level
       if (!CLICKUP_WORKSPACE_ID) {
         return res.status(500).json({ error: "CLICKUP_WORKSPACE_ID not set" });
       }
@@ -70,22 +69,24 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
 
     const cuRes = await fetch(url, {
       headers: {
-        "Authorization": CLICKUP_API_TOKEN
+        Authorization: CLICKUP_API_TOKEN
       }
     });
 
     if (!cuRes.ok) {
       const text = await cuRes.text();
-      return res.status(cuRes.status).json({ error: "ClickUp error", details: text });
+      return res
+        .status(cuRes.status)
+        .json({ error: "ClickUp error", details: text });
     }
 
     const data = await cuRes.json();
     const tasks = data.tasks || [];
 
-    // 🔹 NEW: limit results to 5 (or value from query)
+    // apply limit
     const limited = tasks.slice(0, limit);
 
-    const items = limited.map(t => ({
+    const items = limited.map((t) => ({
       id: t.id,
       name: t.name,
       url: t.url,
@@ -102,7 +103,6 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
 });
 
 // get single task
-// GET /tools/clickup_get_task?task_id=xxxx
 app.get("/tools/clickup_get_task", async (req, res) => {
   try {
     const { task_id } = req.query;
@@ -113,23 +113,30 @@ app.get("/tools/clickup_get_task", async (req, res) => {
       return res.status(500).json({ error: "CLICKUP_API_TOKEN not set" });
     }
 
-    const cuRes = await fetch(`https://api.clickup.com/api/v2/task/${task_id}`, {
-      headers: {
-        "Authorization": CLICKUP_API_TOKEN
+    const cuRes = await fetch(
+      `https://api.clickup.com/api/v2/task/${task_id}`,
+      {
+        headers: {
+          Authorization: CLICKUP_API_TOKEN
+        }
       }
-    });
+    );
 
     if (!cuRes.ok) {
       const text = await cuRes.text();
-      return res.status(cuRes.status).json({ error: "ClickUp error", details: text });
+      return res
+        .status(cuRes.status)
+        .json({ error: "ClickUp error", details: text });
     }
 
     const task = await cuRes.json();
+
     res.json({
       id: task.id,
       name: task.name,
       url: task.url,
       status: task.status?.status,
+      list: task.list ? task.list.name : null,
       custom_fields: task.custom_fields || []
     });
   } catch (err) {
