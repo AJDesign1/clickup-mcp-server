@@ -20,4 +20,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # start our HTTP wrapper
-CMD ["npm", "start"]
+CMD ["node", "server.js"]
