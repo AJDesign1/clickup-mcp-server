@@ -97,10 +97,18 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       arr.sort((a, b) => Number(b.date_created || 0) - Number(a.date_created || 0));
 
     // 1) active first (case-insensitive match)
-    let active = tasks.filter(t => {
-      const listName = (t.list ? t.list.name : "").toLowerCase();
-      return ACTIVE_LISTS.includes(listName);
-    });
+     let active;
+
+    if (job_number) {
+      // if user gave a job number, search across ALL tasks we got from ClickUp
+      active = tasks;
+    } else {
+      // normal behaviour: only our active lists
+      active = tasks.filter(t => {
+        const listName = (t.list ? t.list.name : "").toLowerCase();
+        return ACTIVE_LISTS.includes(listName);
+      });
+    }
 
     // 2) apply local search to active
     if (search) {
