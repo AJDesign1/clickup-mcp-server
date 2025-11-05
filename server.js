@@ -128,6 +128,25 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       });
     }
 
+    // 2.7) optional job number filter
+    if (job_number) {
+      const j = job_number.toString().toLowerCase();
+      active = active.filter(t => {
+    // match in custom fields
+        const cfMatch = (t.custom_fields || []).some(cf => {
+        const name = (cf.name || "").toLowerCase();
+        const val = (cf.value || "").toString().toLowerCase();
+        return name.includes("job number") && val === j;
+   });
+
+    // match in task name/description
+    const nameMatch = (t.name || "").toLowerCase().includes(j);
+    const descMatch = (t.text_content || "").toLowerCase().includes(j);
+
+    return cfMatch || nameMatch || descMatch;
+  });
+}
+
     // 3) sort active newest first
     active = sortByCreatedDesc(active);
 
