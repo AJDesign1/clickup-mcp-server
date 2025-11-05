@@ -8,6 +8,7 @@ const PORT = process.env.PORT || 8080;
 const MCP_BEARER = process.env.MCP_BEARER;
 const CLICKUP_API_TOKEN = process.env.CLICKUP_API_TOKEN;
 const CLICKUP_WORKSPACE_ID = process.env.CLICKUP_WORKSPACE_ID;
+const CLICKUP_INVOICING_LIST_ID = process.env.CLICKUP_INVOICING_LIST_ID; // 👈 add this in Render
 
 app.use(express.json());
 
@@ -50,14 +51,6 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       "design - work in progress",
       "production - work in progress",
       "fitting - work in progress"
-    ];
-
-    const INVOICING_LISTS = [
-      "invoicing - completed jobs", // your actual name
-      "invoicing",
-      "invoiced",
-      "completed",
-      "closed"
     ];
 
     let url;
@@ -142,26 +135,30 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     let invoicing = [];
 
     // 4) only add invoicing/completed if user asked for it
-    if (includeInvoicing) {
-      // fuzzy, case-insensitive match for your invoicing list name
-      invoicing = tasks.filter(t => {
-        const listName = (t.list ? t.list.name : "").toLowerCase();
-        return INVOICING_LISTS.some(name => listName === name || listName.includes(name));
+    if (includeInvoicing && CLICKUP_INVOICING_LIST_ID) {
+      const params = new URLSearchParams({
+        subtasks: "true",
+        archived: "false",
+        order_by: "created",
+        reverse: "true",
+        page: "0",
+        limit: "100" // hard cap
       });
+      if (search) params.set("search", search);
 
-      if (search) {
-        const s = search.toLowerCase();
-        invoicing = invoicing.filter(t => {
-          const nameMatch = (t.name || "").toLowerCase().includes(s);
-          const clientMatch = (t.text_content || "").toLowerCase().includes(s);
-          const customMatch = (t.custom_fields || []).some(cf => {
-            const val = (cf.value || cf.name || "").toString().toLowerCase();
-            return val.includes(s);
-          });
-          return nameMatch || clientMatch || customMatch;
-        });
+      const invRes = await fetch(
+        `https://api.clickup.com/api/v2/list/${CLICKUP_INVOICING_LIST_ID}/task?${params.toString()}`,
+        {
+          headers: { Authorization: CLICKUP_API_TOKEN }
+        }
+      );
+
+      if (invRes.ok) {
+        const invData = await invRes.json();
+        invoicing = invData.tasks || [];
       }
 
+      // optional sector filter on invoicing
       if (sector) {
         const s = sector.toLowerCase();
         invoicing = invoicing.filter(t => {
