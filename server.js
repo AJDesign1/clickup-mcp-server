@@ -43,19 +43,21 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     const includeInvoicing = req.query.include_invoicing === "true";
     const limit = parseInt(req.query.limit || "40", 10);
 
+    // we'll compare in lowercase
     const ACTIVE_LISTS = [
-      "SALES - Enquiries & Quotations",
-      "SALES - Confirmed Orders",
-      "DESIGN - Work in progress",
-      "PRODUCTION - Work in progress",
-      "FITTING - Work in progress"
+      "sales - enquiries & quotations",
+      "sales - confirmed orders",
+      "design - work in progress",
+      "production - work in progress",
+      "fitting - work in progress"
     ];
 
     const INVOICING_LISTS = [
-      "INVOICING",
-      "Invoicing",
-      "Completed",
-      "Closed"
+      "invoicing - completed jobs", // your actual name
+      "invoicing",
+      "invoiced",
+      "completed",
+      "closed"
     ];
 
     let url;
@@ -101,9 +103,9 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     const sortByCreatedDesc = arr =>
       arr.sort((a, b) => Number(b.date_created || 0) - Number(a.date_created || 0));
 
-    // 1) active first
+    // 1) active first (case-insensitive match)
     let active = tasks.filter(t => {
-      const listName = t.list ? t.list.name : "";
+      const listName = (t.list ? t.list.name : "").toLowerCase();
       return ACTIVE_LISTS.includes(listName);
     });
 
@@ -141,9 +143,10 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
 
     // 4) only add invoicing/completed if user asked for it
     if (includeInvoicing) {
+      // fuzzy, case-insensitive match for your invoicing list name
       invoicing = tasks.filter(t => {
-        const listName = t.list ? t.list.name : "";
-        return INVOICING_LISTS.includes(listName);
+        const listName = (t.list ? t.list.name : "").toLowerCase();
+        return INVOICING_LISTS.some(name => listName === name || listName.includes(name));
       });
 
       if (search) {
@@ -159,7 +162,6 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
         });
       }
 
-      // sector filter for invoicing too
       if (sector) {
         const s = sector.toLowerCase();
         invoicing = invoicing.filter(t => {
