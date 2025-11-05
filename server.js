@@ -40,28 +40,46 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     }
 
     const { search, list_id } = req.query;
-    // default to 5 to avoid big payloads
-    const limit = parseInt(req.query.limit || "5", 10);
+    const includeInvoicing = req.query.include_invoicing === "true";
+    const limit = parseInt(req.query.limit || "40", 10);
+
+    const ACTIVE_LISTS = [
+      "SALES - Enquiries & Quotations",
+      "SALES - Confirmed Orders",
+      "DESIGN - Work in progress",
+      "PRODUCTION - Work in progress",
+      "FITTING - Work in progress"
+    ];
+
+    // whatever your completed/invoicing list is actually called, add it here
+    const INVOICING_LISTS = [
+      "INVOICING",
+      "Invoicing",
+      "Completed",
+      "Closed"
+    ];
 
     let url;
 
     if (list_id) {
-      // list-specific tasks
       const params = new URLSearchParams({
         subtasks: "true",
-        archived: "false"
+        archived: "false",
+        order_by: "created",
+        reverse: "true"
       });
       if (search) params.set("search", search);
       url = `https://api.clickup.com/api/v2/list/${list_id}/task?${params.toString()}`;
     } else {
-      // workspace/team level
       if (!CLICKUP_WORKSPACE_ID) {
         return res.status(500).json({ error: "CLICKUP_WORKSPACE_ID not set" });
       }
       const params = new URLSearchParams({
         subtasks: "true",
         archived: "false",
-        include_closed: "false"
+        include_closed: "false",
+        order_by: "created",
+        reverse: "true"
       });
       if (search) params.set("search", search);
       url = `https://api.clickup.com/api/v2/team/${CLICKUP_WORKSPACE_ID}/task?${params.toString()}`;
@@ -75,27 +93,83 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
 
     if (!cuRes.ok) {
       const text = await cuRes.text();
-      return res
-        .status(cuRes.status)
-        .json({ error: "ClickUp error", details: text });
+      return res.status(cuRes.status).json({ error: "ClickUp error", details: text });
     }
 
     const data = await cuRes.json();
     const tasks = data.tasks || [];
 
-    // apply limit
-    const limited = tasks.slice(0, limit);
+    const sortByCreatedDesc = arr =>
+      arr.sort((a, b) => Number(b.date_created || 0) - Number(a.date_created || 0));
 
-    const items = limited.map((t) => ({
+    // 1) active first
+    let active = tasks.filter(t => {
+      const listName = t.list ? t.list.name : "";
+      return ACTIVE_LISTS.includes(listName);
+    });
+
+    // apply local search to active
+    if (search) {
+      const s = search.toLowerCase();
+      active = active.filter(t => {
+        const nameMatch = (t.name || "").toLowerCase().includes(s);
+        const clientMatch = (t.text_content || "").toLowerCase().includes(s);
+        const customMatch = (t.custom_fields || []).some(cf => {
+          const val = (cf.value || cf.name || "").toString().toLowerCase();
+          return val.includes(s);
+        });
+        return nameMatch || clientMatch || customMatch;
+      });
+    }
+
+    active = sortByCreatedDesc(active);
+
+    let combined = [...active];
+    let invoicing = [];
+
+    // 2) only add invoicing/completed if user asked for it
+    if (includeInvoicing) {
+      invoicing = tasks.filter(t => {
+        const listName = t.list ? t.list.name : "";
+        return INVOICING_LISTS.includes(listName);
+      });
+
+      if (search) {
+        const s = search.toLowerCase();
+        invoicing = invoicing.filter(t => {
+          const nameMatch = (t.name || "").toLowerCase().includes(s);
+          const clientMatch = (t.text_content || "").toLowerCase().includes(s);
+          const customMatch = (t.custom_fields || []).some(cf => {
+            const val = (cf.value || cf.name || "").toString().toLowerCase();
+            return val.includes(s);
+          });
+          return nameMatch || clientMatch || customMatch;
+        });
+      }
+
+      invoicing = sortByCreatedDesc(invoicing);
+      combined = [...active, ...invoicing];
+    }
+
+    const limited = combined.slice(0, limit);
+
+    const items = limited.map(t => ({
       id: t.id,
       name: t.name,
       url: t.url,
       status: t.status?.status,
       list: t.list ? t.list.name : null,
-      custom_fields: t.custom_fields || []
+      custom_fields: t.custom_fields || [],
+      date_created: t.date_created || null
     }));
 
-    res.json({ items, total_returned: items.length });
+    res.json({
+      items,
+      total_returned: items.length,
+      active_count: active.length,
+      invoicing_count: invoicing.length,
+      invoicing_included: includeInvoicing
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Server error", details: err.message });
