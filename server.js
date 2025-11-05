@@ -33,6 +33,46 @@ app.get("/tools", (req, res) => {
   });
 });
 
+// debug: show the first few tasks raw from ClickUp
+app.get("/debug/tasks", async (req, res) => {
+  try {
+    if (!CLICKUP_API_TOKEN || !CLICKUP_WORKSPACE_ID) {
+      return res.status(500).json({ error: "missing env" });
+    }
+
+    const params = new URLSearchParams({
+      subtasks: "true",
+      archived: "false",
+      include_closed: "false",
+      order_by: "created",
+      reverse: "true",
+      limit: "20"
+    });
+
+    const url = `https://api.clickup.com/api/v2/team/${CLICKUP_WORKSPACE_ID}/task?${params.toString()}`;
+
+    const cuRes = await fetch(url, {
+      headers: { Authorization: CLICKUP_API_TOKEN }
+    });
+
+    const data = await cuRes.json();
+    const tasks = data.tasks || [];
+
+    // just return the fields we care about to keep it small
+    const slim = tasks.map(t => ({
+      id: t.id,
+      name: t.name,
+      list: t.list ? t.list.name : null,
+      custom_fields: t.custom_fields || []
+    }));
+
+    res.json({ count: slim.length, tasks: slim });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "debug failed", details: err.message });
+  }
+});
+
 // list tasks (with default limit 40)
 app.get("/tools/clickup_list_tasks", async (req, res) => {
   try {
