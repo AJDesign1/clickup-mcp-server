@@ -1,4 +1,4 @@
- import http from "node:http";
+import http from "node:http";
 import { URL } from "node:url";
 
 // env
@@ -118,54 +118,64 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // debug list (with single=true support)
-    if (path === "/debug/tasks" && req.method === "GET") {
-      if (!CLICKUP_API_TOKEN || !CLICKUP_WORKSPACE_ID) {
-        return sendJson(res, 500, { error: "missing env" });
-      }
+// debug tasks — always return just one task to keep connector lightweight
+if (path === "/debug/tasks" && req.method === "GET") {
+  try {
+    if (!CLICKUP_API_TOKEN || !CLICKUP_WORKSPACE_ID) {
+      return sendJson(res, 500, { error: "missing env" });
+    }
 
-      const search = url.searchParams.get("search");
-      const job_number = url.searchParams.get("job_number");
-      const limit = url.searchParams.get("limit") || "50";
-      const single = url.searchParams.get("single") === "true";
+    const search = url.searchParams.get("search");
+    const job_number = url.searchParams.get("job_number");
 
-      const params = new URLSearchParams({
-        subtasks: "true",
-        archived: "false",
-        include_closed: "false",
-        order_by: "created",
-        reverse: "true",
-        limit
-      });
-      if (search) {
-        params.set("search", search);
-      } else if (job_number) {
-        params.set("search", job_number.toString());
-      }
+    const params = new URLSearchParams({
+      subtasks: "true",
+      archived: "false",
+      include_closed: "false",
+      order_by: "created",
+      reverse: "true",
+      limit: "20"   // hard cap so it never returns huge payloads
+    });
 
-      const cuRes = await fetch(
-        `https://api.clickup.com/api/v2/team/${CLICKUP_WORKSPACE_ID}/task?${params.toString()}`,
-        { headers: { Authorization: CLICKUP_API_TOKEN } }
-      );
-      const data = await cuRes.json();
-      const tasks = data.tasks || [];
+    if (search) {
+      params.set("search", search);
+    } else if (job_number) {
+      params.set("search", job_number.toString());
+    }
 
-      const slim = tasks.map(t => ({
+    const cuRes = await fetch(
+      `https://api.clickup.com/api/v2/team/${CLICKUP_WORKSPACE_ID}/task?${params.toString()}`,
+      { headers: { Authorization: CLICKUP_API_TOKEN } }
+    );
+
+    if (!cuRes.ok) {
+      const text = await cuRes.text();
+      return sendJson(res, cuRes.status, { error: "ClickUp error", details: text });
+    }
+
+    const data = await cuRes.json();
+    const tasks = data.tasks || [];
+
+    if (tasks.length === 0) {
+      return sendJson(res, 200, { found: false, task: null });
+    }
+
+    const t = tasks[0];
+    return sendJson(res, 200, {
+      found: true,
+      task: {
         id: t.id,
         name: t.name,
         list: t.list ? t.list.name : null,
         custom_fields: t.custom_fields || []
-      }));
-
-      if (single) {
-        if (slim.length === 0) {
-          return sendJson(res, 200, { found: false, task: null });
-        }
-        return sendJson(res, 200, { found: true, task: slim[0] });
       }
+    });
+  } catch (err) {
+    console.error(err);
+    return sendJson(res, 500, { error: "debug failed", details: err.message });
+  }
+}
 
-      return sendJson(res, 200, { count: slim.length, tasks: slim });
-    }
 
     // list tasks (main tool)
     if (path === "/tools/clickup_list_tasks" && req.method === "GET") {
