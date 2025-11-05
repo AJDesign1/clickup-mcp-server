@@ -51,7 +51,6 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       "FITTING - Work in progress"
     ];
 
-    // whatever your completed/invoicing list is actually called, add it here
     const INVOICING_LISTS = [
       "INVOICING",
       "Invoicing",
@@ -122,19 +121,18 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       });
     }
 
-    // 2.5) OPTIONAL SECTOR FILTER – ADD THIS BLOCK
+    // 2.5) optional sector filter
     if (sector) {
       const s = sector.toLowerCase();
       active = active.filter(t => {
         return (t.custom_fields || []).some(cf => {
           const name = (cf.name || "").toLowerCase();
           const val = (cf.value || "").toString().toLowerCase();
-          // matches any custom field called "Sector" whose value contains the sector
           return name.includes("sector") && val.includes(s);
         });
       });
     }
-    
+
     // 3) sort active newest first
     active = sortByCreatedDesc(active);
 
@@ -161,7 +159,7 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
         });
       }
 
-   // only filter invoicing by sector if the user actually asked for sector
+      // sector filter for invoicing too
       if (sector) {
         const s = sector.toLowerCase();
         invoicing = invoicing.filter(t => {
@@ -172,7 +170,7 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
           });
         });
       }
-      
+
       invoicing = sortByCreatedDesc(invoicing);
       combined = [...active, ...invoicing];
     }
