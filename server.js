@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 8080;
 const MCP_BEARER = process.env.MCP_BEARER;
 const CLICKUP_API_TOKEN = process.env.CLICKUP_API_TOKEN;
 const CLICKUP_WORKSPACE_ID = process.env.CLICKUP_WORKSPACE_ID;
-const CLICKUP_INVOICING_LIST_ID = process.env.CLICKUP_INVOICING_LIST_ID; // 👈 add this in Render
+const CLICKUP_INVOICING_LIST_ID = process.env.CLICKUP_INVOICING_LIST_ID;
 
 app.use(express.json());
 
@@ -33,7 +33,7 @@ app.get("/tools", (req, res) => {
   });
 });
 
-// debug: show the first few tasks raw from ClickUp
+// debug: show first tasks + custom fields
 app.get("/debug/tasks", async (req, res) => {
   try {
     if (!CLICKUP_API_TOKEN || !CLICKUP_WORKSPACE_ID) {
@@ -46,19 +46,16 @@ app.get("/debug/tasks", async (req, res) => {
       include_closed: "false",
       order_by: "created",
       reverse: "true",
-      limit: "20"
+      limit: req.query.limit || "100"
     });
 
     const url = `https://api.clickup.com/api/v2/team/${CLICKUP_WORKSPACE_ID}/task?${params.toString()}`;
-
     const cuRes = await fetch(url, {
       headers: { Authorization: CLICKUP_API_TOKEN }
     });
-
     const data = await cuRes.json();
     const tasks = data.tasks || [];
 
-    // just return the fields we care about to keep it small
     const slim = tasks.map(t => ({
       id: t.id,
       name: t.name,
@@ -73,7 +70,40 @@ app.get("/debug/tasks", async (req, res) => {
   }
 });
 
-// list tasks (with default limit 40)
+// helper: match job number in name/desc/custom field
+function matchesJobNumber(task, jobNumber) {
+  if (!task || !jobNumber) return false;
+  const j = jobNumber.toString().toLowerCase();
+
+  // task name
+  if ((task.name || "").toLowerCase().includes(j)) return true;
+
+  // task description
+  if ((task.text_content || "").toLowerCase().includes(j)) return true;
+
+  // custom fields
+  const cfs = task.custom_fields || [];
+  for (const cf of cfs) {
+    const name = (cf.name || "").toLowerCase();
+    if (!name.includes("job number")) continue;
+
+    // plain value
+    if (typeof cf.value === "string" || typeof cf.value === "number") {
+      const val = cf.value.toString().toLowerCase();
+      if (val === j || val.includes(j)) return true;
+    }
+
+    // structured value
+    if (cf.value && typeof cf.value === "object") {
+      if (cf.value.label && cf.value.label.toString().toLowerCase().includes(j)) return true;
+      if (cf.value.name && cf.value.name.toString().toLowerCase().includes(j)) return true;
+    }
+  }
+
+  return false;
+}
+
+// list tasks
 app.get("/tools/clickup_list_tasks", async (req, res) => {
   try {
     if (!CLICKUP_API_TOKEN) {
@@ -84,7 +114,7 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     const includeInvoicing = req.query.include_invoicing === "true";
     const limit = parseInt(req.query.limit || "40", 10);
 
-    // we'll compare in lowercase
+    // lists we care about (names from your setup, lowercased)
     const ACTIVE_LISTS = [
       "sales - enquiries & quotations",
       "sales - confirmed orders",
@@ -93,8 +123,8 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       "fitting - work in progress"
     ];
 
+    // 1) fetch tasks (either from specific list or whole team)
     let url;
-
     if (list_id) {
       const params = new URLSearchParams({
         subtasks: "true",
@@ -136,21 +166,20 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     const sortByCreatedDesc = arr =>
       arr.sort((a, b) => Number(b.date_created || 0) - Number(a.date_created || 0));
 
-    // 1) active first (case-insensitive match)
-     let active;
-
+    // 2) choose starting set
+    let active;
     if (job_number) {
-      // if user gave a job number, search across ALL tasks we got from ClickUp
+      // job number searches should look across everything we fetched
       active = tasks;
     } else {
-      // normal behaviour: only our active lists
+      // normal behaviour: only your active lists
       active = tasks.filter(t => {
         const listName = (t.list ? t.list.name : "").toLowerCase();
         return ACTIVE_LISTS.includes(listName);
       });
     }
 
-    // 2) apply local search to active
+    // 3) apply local search
     if (search) {
       const s = search.toLowerCase();
       active = active.filter(t => {
@@ -164,7 +193,7 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       });
     }
 
-    // 2.5) optional sector filter
+    // 4) sector filter
     if (sector) {
       const s = sector.toLowerCase();
       active = active.filter(t => {
@@ -176,32 +205,16 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       });
     }
 
-    // 2.7) optional job number filter
+    // 5) job number filter
     if (job_number) {
-      const j = job_number.toString().toLowerCase();
-      active = active.filter(t => {
-    // match in custom fields
-        const cfMatch = (t.custom_fields || []).some(cf => {
-        const name = (cf.name || "").toLowerCase();
-        const val = (cf.value || "").toString().toLowerCase();
-        return name.includes("job number") && val === j;
-   });
+      active = active.filter(t => matchesJobNumber(t, job_number));
+    }
 
-    // match in task name/description
-    const nameMatch = (t.name || "").toLowerCase().includes(j);
-    const descMatch = (t.text_content || "").toLowerCase().includes(j);
-
-    return cfMatch || nameMatch || descMatch;
-  });
-}
-
-    // 3) sort active newest first
+    // 6) sort active newest first
     active = sortByCreatedDesc(active);
 
-    let combined = [...active];
+    // 7) optionally fetch invoicing separately (capped)
     let invoicing = [];
-
-    // 4) only add invoicing/completed if user asked for it
     if (includeInvoicing && CLICKUP_INVOICING_LIST_ID) {
       const params = new URLSearchParams({
         subtasks: "true",
@@ -209,23 +222,19 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
         order_by: "created",
         reverse: "true",
         page: "0",
-        limit: "100" // hard cap
+        limit: "100"
       });
       if (search) params.set("search", search);
-
       const invRes = await fetch(
         `https://api.clickup.com/api/v2/list/${CLICKUP_INVOICING_LIST_ID}/task?${params.toString()}`,
-        {
-          headers: { Authorization: CLICKUP_API_TOKEN }
-        }
+        { headers: { Authorization: CLICKUP_API_TOKEN } }
       );
-
       if (invRes.ok) {
         const invData = await invRes.json();
         invoicing = invData.tasks || [];
       }
 
-      // optional sector filter on invoicing
+      // sector on invoicing
       if (sector) {
         const s = sector.toLowerCase();
         invoicing = invoicing.filter(t => {
@@ -237,10 +246,21 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
         });
       }
 
+      // job number on invoicing
+      if (job_number) {
+        invoicing = invoicing.filter(t => matchesJobNumber(t, job_number));
+      }
+
       invoicing = sortByCreatedDesc(invoicing);
+    }
+
+    // 8) combine
+    let combined = [...active];
+    if (includeInvoicing && CLICKUP_INVOICING_LIST_ID) {
       combined = [...active, ...invoicing];
     }
 
+    // 9) limit & shape
     const limited = combined.slice(0, limit);
 
     const items = limited.map(t => ({
