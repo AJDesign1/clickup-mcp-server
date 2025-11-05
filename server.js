@@ -40,7 +40,7 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       return res.status(500).json({ error: "CLICKUP_API_TOKEN not set" });
     }
 
-    const { search, list_id, sector } = req.query;
+    const { search, list_id, sector, job_number } = req.query;
     const includeInvoicing = req.query.include_invoicing === "true";
     const limit = parseInt(req.query.limit || "40", 10);
 
