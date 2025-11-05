@@ -32,14 +32,14 @@ app.get("/tools", (req, res) => {
   });
 });
 
-// list tasks (with default limit 5)
+// list tasks (with default limit 40)
 app.get("/tools/clickup_list_tasks", async (req, res) => {
   try {
     if (!CLICKUP_API_TOKEN) {
       return res.status(500).json({ error: "CLICKUP_API_TOKEN not set" });
     }
 
-    const { search, list_id } = req.query;
+    const { search, list_id, sector } = req.query;
     const includeInvoicing = req.query.include_invoicing === "true";
     const limit = parseInt(req.query.limit || "40", 10);
 
@@ -108,7 +108,7 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       return ACTIVE_LISTS.includes(listName);
     });
 
-    // apply local search to active
+    // 2) apply local search to active
     if (search) {
       const s = search.toLowerCase();
       active = active.filter(t => {
@@ -122,12 +122,26 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       });
     }
 
+    // 2.5) OPTIONAL SECTOR FILTER – ADD THIS BLOCK
+    if (sector) {
+      const s = sector.toLowerCase();
+      active = active.filter(t => {
+        return (t.custom_fields || []).some(cf => {
+          const name = (cf.name || "").toLowerCase();
+          const val = (cf.value || "").toString().toLowerCase();
+          // matches any custom field called "Sector" whose value contains the sector
+          return name.includes("sector") && val.includes(s);
+        });
+      });
+    }
+    
+    // 3) sort active newest first
     active = sortByCreatedDesc(active);
 
     let combined = [...active];
     let invoicing = [];
 
-    // 2) only add invoicing/completed if user asked for it
+    // 4) only add invoicing/completed if user asked for it
     if (includeInvoicing) {
       invoicing = tasks.filter(t => {
         const listName = t.list ? t.list.name : "";
@@ -147,6 +161,18 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
         });
       }
 
+   // only filter invoicing by sector if the user actually asked for sector
+      if (sector) {
+        const s = sector.toLowerCase();
+        invoicing = invoicing.filter(t => {
+          return (t.custom_fields || []).some(cf => {
+            const name = (cf.name || "").toLowerCase();
+            const val = (cf.value || "").toString().toLowerCase();
+            return name.includes("sector") && val.includes(s);
+          });
+        });
+      }
+      
       invoicing = sortByCreatedDesc(invoicing);
       combined = [...active, ...invoicing];
     }
