@@ -110,11 +110,9 @@ app.get("/debug/tasks", async (req, res) => {
       limit
     });
 
-    // if user sent search, use it
     if (search) {
       params.set("search", search);
     } else if (job_number) {
-      // let us test job-number searches
       params.set("search", job_number.toString());
     }
 
@@ -133,6 +131,18 @@ app.get("/debug/tasks", async (req, res) => {
       custom_fields: t.custom_fields || []
     }));
 
+    // 👇 NEW: let us request just one task
+    if (req.query.single === "true") {
+      if (slim.length === 0) {
+        return res.json({ found: false, task: null });
+      }
+      return res.json({
+        found: true,
+        task: slim[0]
+      });
+    }
+
+    // default: existing behaviour
     res.json({ count: slim.length, tasks: slim });
   } catch (err) {
     console.error(err);
