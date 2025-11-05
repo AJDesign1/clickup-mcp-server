@@ -40,16 +40,28 @@ app.get("/debug/tasks", async (req, res) => {
       return res.status(500).json({ error: "missing env" });
     }
 
+    const { search, job_number } = req.query;
+    const limit = req.query.limit || "50";
+
     const params = new URLSearchParams({
       subtasks: "true",
       archived: "false",
       include_closed: "false",
       order_by: "created",
       reverse: "true",
-      limit: req.query.limit || "100"
+      limit
     });
 
+    // if user sent search, use it
+    if (search) {
+      params.set("search", search);
+    } else if (job_number) {
+      // let us test job-number searches
+      params.set("search", job_number.toString());
+    }
+
     const url = `https://api.clickup.com/api/v2/team/${CLICKUP_WORKSPACE_ID}/task?${params.toString()}`;
+
     const cuRes = await fetch(url, {
       headers: { Authorization: CLICKUP_API_TOKEN }
     });
