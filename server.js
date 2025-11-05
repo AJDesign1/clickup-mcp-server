@@ -15,7 +15,7 @@ app.use(express.json());
 // auth middleware (let /health through)
 app.use((req, res, next) => {
   if (req.path === "/health") return next();
-  if (!MCP_BEARER) return next(); // if no bearer is set, don't block
+  if (!MCP_BEARER) return next();
   const auth = req.headers.authorization || "";
   if (auth === `Bearer ${MCP_BEARER}`) return next();
   return res.status(401).json({ error: "Unauthorized" });
@@ -33,7 +33,7 @@ app.get("/tools", (req, res) => {
   });
 });
 
-// debug: show first tasks + custom fields
+// debug
 app.get("/debug/tasks", async (req, res) => {
   try {
     if (!CLICKUP_API_TOKEN || !CLICKUP_WORKSPACE_ID) {
@@ -70,30 +70,24 @@ app.get("/debug/tasks", async (req, res) => {
   }
 });
 
-// helper: match job number in name/desc/custom field
+// helper: match job number in various places
 function matchesJobNumber(task, jobNumber) {
   if (!task || !jobNumber) return false;
   const j = jobNumber.toString().toLowerCase();
 
-  // task name
   if ((task.name || "").toLowerCase().includes(j)) return true;
-
-  // task description
   if ((task.text_content || "").toLowerCase().includes(j)) return true;
 
-  // custom fields
   const cfs = task.custom_fields || [];
   for (const cf of cfs) {
     const name = (cf.name || "").toLowerCase();
     if (!name.includes("job number")) continue;
 
-    // plain value
     if (typeof cf.value === "string" || typeof cf.value === "number") {
       const val = cf.value.toString().toLowerCase();
       if (val === j || val.includes(j)) return true;
     }
 
-    // structured value
     if (cf.value && typeof cf.value === "object") {
       if (cf.value.label && cf.value.label.toString().toLowerCase().includes(j)) return true;
       if (cf.value.name && cf.value.name.toString().toLowerCase().includes(j)) return true;
@@ -114,7 +108,6 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     const includeInvoicing = req.query.include_invoicing === "true";
     const limit = parseInt(req.query.limit || "40", 10);
 
-    // lists we care about (names from your setup, lowercased)
     const ACTIVE_LISTS = [
       "sales - enquiries & quotations",
       "sales - confirmed orders",
@@ -123,8 +116,8 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       "fitting - work in progress"
     ];
 
-    // 1) fetch tasks (either from specific list or whole team)
     let url;
+
     if (list_id) {
       const params = new URLSearchParams({
         subtasks: "true",
@@ -132,7 +125,11 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
         order_by: "created",
         reverse: "true"
       });
-      if (search) params.set("search", search);
+      if (search) {
+        params.set("search", search);
+      } else if (job_number) {
+        params.set("search", job_number.toString());
+      }
       url = `https://api.clickup.com/api/v2/list/${list_id}/task?${params.toString()}`;
     } else {
       if (!CLICKUP_WORKSPACE_ID) {
@@ -145,14 +142,16 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
         order_by: "created",
         reverse: "true"
       });
-      if (search) params.set("search", search);
+      if (search) {
+        params.set("search", search);
+      } else if (job_number) {
+        params.set("search", job_number.toString());
+      }
       url = `https://api.clickup.com/api/v2/team/${CLICKUP_WORKSPACE_ID}/task?${params.toString()}`;
     }
 
     const cuRes = await fetch(url, {
-      headers: {
-        Authorization: CLICKUP_API_TOKEN
-      }
+      headers: { Authorization: CLICKUP_API_TOKEN }
     });
 
     if (!cuRes.ok) {
@@ -166,20 +165,18 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
     const sortByCreatedDesc = arr =>
       arr.sort((a, b) => Number(b.date_created || 0) - Number(a.date_created || 0));
 
-    // 2) choose starting set
+    // choose starting set
     let active;
     if (job_number) {
-      // job number searches should look across everything we fetched
-      active = tasks;
+      active = tasks; // look through everything we just asked clickup for using search=job_number
     } else {
-      // normal behaviour: only your active lists
       active = tasks.filter(t => {
         const listName = (t.list ? t.list.name : "").toLowerCase();
         return ACTIVE_LISTS.includes(listName);
       });
     }
 
-    // 3) apply local search
+    // search filter
     if (search) {
       const s = search.toLowerCase();
       active = active.filter(t => {
@@ -193,7 +190,7 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       });
     }
 
-    // 4) sector filter
+    // sector filter
     if (sector) {
       const s = sector.toLowerCase();
       active = active.filter(t => {
@@ -205,15 +202,14 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       });
     }
 
-    // 5) job number filter
+    // job number filter (local)
     if (job_number) {
       active = active.filter(t => matchesJobNumber(t, job_number));
     }
 
-    // 6) sort active newest first
     active = sortByCreatedDesc(active);
 
-    // 7) optionally fetch invoicing separately (capped)
+    // invoicing (optional, capped)
     let invoicing = [];
     if (includeInvoicing && CLICKUP_INVOICING_LIST_ID) {
       const params = new URLSearchParams({
@@ -224,17 +220,22 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
         page: "0",
         limit: "100"
       });
-      if (search) params.set("search", search);
+      if (search) {
+        params.set("search", search);
+      } else if (job_number) {
+        params.set("search", job_number.toString());
+      }
+
       const invRes = await fetch(
         `https://api.clickup.com/api/v2/list/${CLICKUP_INVOICING_LIST_ID}/task?${params.toString()}`,
         { headers: { Authorization: CLICKUP_API_TOKEN } }
       );
+
       if (invRes.ok) {
         const invData = await invRes.json();
         invoicing = invData.tasks || [];
       }
 
-      // sector on invoicing
       if (sector) {
         const s = sector.toLowerCase();
         invoicing = invoicing.filter(t => {
@@ -246,7 +247,6 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
         });
       }
 
-      // job number on invoicing
       if (job_number) {
         invoicing = invoicing.filter(t => matchesJobNumber(t, job_number));
       }
@@ -254,13 +254,11 @@ app.get("/tools/clickup_list_tasks", async (req, res) => {
       invoicing = sortByCreatedDesc(invoicing);
     }
 
-    // 8) combine
     let combined = [...active];
     if (includeInvoicing && CLICKUP_INVOICING_LIST_ID) {
       combined = [...active, ...invoicing];
     }
 
-    // 9) limit & shape
     const limited = combined.slice(0, limit);
 
     const items = limited.map(t => ({
